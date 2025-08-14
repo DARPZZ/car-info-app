@@ -1,13 +1,26 @@
+import 'dart:convert';
+
 import 'package:camera/camera.dart';
+import 'package:car_app_2/CarInfoProvider.dart';
 import 'package:car_app_2/basicinfowidget.dart';
+import 'package:car_app_2/car_info.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
 late List<CameraDescription> _cameras;
 
-Future<void> main() async {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   _cameras = await availableCameras();
-  runApp(const MainApp());
+
+  runApp(
+    ChangeNotifierProvider(
+      create: (_) => CarInfoProvider(),
+      child: const MainApp(),
+    ),
+  );
 }
+
 
 class MainApp extends StatelessWidget {
   const MainApp({super.key});
@@ -46,22 +59,47 @@ class _CameraScreenState extends State<CameraScreen> {
     _controller.dispose();
     super.dispose();
   }
+Future<http.StreamedResponse> createAlbum(XFile image) async {
+  var uri = Uri.parse('http://10.148.69.119:8000/car/api/');
+  var request = http.MultipartRequest('POST', uri);
 
-  Future<void> _takePicture() async {
-    // try {
-    //   await _initializeControllerFuture;
-    //   final image = await _controller.takePicture();
-    //   ScaffoldMessenger.of(context).showSnackBar(
-    //     SnackBar(content: Text('Picture saved at: ${image.path}')),
-    //   );
-    // } catch (e) {
-    //   print('Error taking picture: $e');
-    // }
-    Navigator.of(context).push(
-    MaterialPageRoute(builder: (context) => const BasicInfoWidget())
+  request.files.add(
+    await http.MultipartFile.fromPath(
+      'image', 
+      image.path,
+    ),
   );
-    
+
+  return await request.send();
+}
+
+Future<void> _takePicture() async {
+  try {
+    await _initializeControllerFuture;
+    final image = await _controller.takePicture();
+    var streamedResponse = await createAlbum(image);
+    var response = await http.Response.fromStream(streamedResponse);
+    if( response.statusCode == 200)
+    {
+      final jsonData = jsonDecode(response.body);
+      final carInfo = CarInfo.fromJson(jsonData);
+      Provider.of<CarInfoProvider>(context, listen: false).setCarInfo(carInfo);
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (context) => const BasicInfoWidget(
+        ))
+      );
+    }
+    else{
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not find the numberplate')),
+        );
+    }
+
+  } catch (e) {
+    print('Error taking picture: $e');
   }
+}
+
 
     @override
     Widget build(BuildContext context) {
@@ -72,7 +110,7 @@ class _CameraScreenState extends State<CameraScreen> {
             if (snapshot.connectionState == ConnectionState.done) {
             return Column(
                 children: [
-                const SizedBox(height: 50), // Pushes text further down
+                const SizedBox(height: 50),
                 const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 16.0),
                     child: Text(
